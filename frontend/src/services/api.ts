@@ -3,7 +3,22 @@
  * Proxied via Vite to Laravel 11 Backend (http://127.0.0.1:8000/api/v1)
  */
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1';
+declare global {
+  interface Window {
+    __EDUCORE_API_URL__?: string;
+  }
+}
+
+export function getApiBase(): string {
+  if (typeof window !== 'undefined' && window.__EDUCORE_API_URL__) {
+    return window.__EDUCORE_API_URL__.replace(/\/$/, '');
+  }
+  const envBase = (import.meta.env.VITE_API_BASE_URL as string) || '';
+  if (envBase) {
+    return envBase.replace(/\/$/, '');
+  }
+  return '/api/v1';
+}
 
 export class ApiError extends Error {
   status: number;
@@ -42,7 +57,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const base = getApiBase();
+  const response = await fetch(`${base}${endpoint}`, {
     ...options,
     headers,
   });

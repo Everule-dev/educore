@@ -1,46 +1,47 @@
-# EDUCORE - Shared Hosting Deployment Guide (cPanel / Apache / DirectAdmin / Plesk)
+# EDUCORE - Shared Hosting Deployment Guide: Domain Root Frontend + Subdomain Backend
 
-This production runbook details the exact steps to deploy the full **EDUCORE Universal Credential Verification & Trust Infrastructure** on standard Linux shared hosting environments with cPanel or similar control panels.
+This production guide details the exact process for hosting the **EDUCORE** system on shared hosting (cPanel / Apache / LiteSpeed / DirectAdmin) using:
+- **Frontend (React 18 SPA):** Hosted on the **Primary Domain Root** (e.g., `https://yourdomain.com` pointing to `public_html/`).
+- **Backend (Laravel 11 API):** Hosted on a dedicated **Subdomain** (e.g., `https://api.yourdomain.com` with Document Root pointing to `/home/username/educore_backend/public`).
 
 ---
 
-## 1. Architecture Overview on Shared Hosting
-
-In shared hosting, web traffic lands in the `public_html/` (or `www/`, `httpdocs/`) directory. For maximum security and compliance with enterprise security standards:
-
-- **Private Application Core (`educore_backend/`):** Placed **outside** and **above** `public_html/` in your user home root (`/home/username/educore_backend/`). This ensures that `.env` files, database credentials, source code, and internal cache cannot be accessed by public web scrapers.
-- **Public Entry Point (`public_html/`):** Contains the compiled React 18 production bundle, public media assets, the Laravel API router bridge (`index.php`), and Apache routing engine (`.htaccess`).
+## 1. Hosting Architecture Map
 
 ```
 /home/your_cpanel_username/
 │
-├── educore_backend/                    <-- PRIVATE (Uploaded one level above public_html)
+├── educore_backend/                         <-- PRIVATE BACKEND (Above public_html)
 │   ├── app/
 │   ├── bootstrap/
-│   │   └── cache/                      (Permissions: 775)
-│   ├── config/
+│   │   └── cache/                           (Permissions: 775)
+│   ├── config/                              (Includes cors.php for cross-subdomain access)
 │   ├── database/
-│   │   ├── educore_database.sql        (Full MySQL Schema & Seed Dump)
+│   │   ├── educore_database.sql             (MySQL Dump with Super Admin tredzroyale@gmail.com)
 │   │   └── migrations/
+│   ├── public/                              <-- SUBDOMAIN DOCUMENT ROOT (api.yourdomain.com)
+│   │   ├── index.php                        (Subdomain front controller)
+│   │   ├── .htaccess                        (Apache rewrite & CORS headers)
+│   │   ├── check_api.php                    (Subdomain diagnostic healthcheck)
+│   │   └── robots.txt
 │   ├── routes/
-│   ├── storage/                        (Permissions: 775)
+│   ├── storage/                             (Permissions: 775)
 │   │   ├── app/public/
 │   │   ├── framework/cache/data/
 │   │   ├── framework/sessions/
 │   │   ├── framework/views/
 │   │   └── logs/
-│   ├── vendor/                         (Complete Composer vendor pre-packaged)
-│   ├── .env                            (Permissions: 600 - DB credentials & settings)
+│   ├── vendor/                              (Pre-packaged Composer dependencies)
+│   ├── .env                                 (Permissions: 600 - DB credentials & settings)
 │   ├── artisan
-│   └── set_permissions.sh              (One-click Linux permission hardener)
+│   └── set_permissions.sh                   (One-click Linux permission hardener)
 │
-└── public_html/                        <-- PUBLIC (Mapped to https://yourdomain.com)
-    ├── assets/                         (Compiled React 18 JS/CSS chunks)
-    ├── index.html                      (React Single Page Application entry)
-    ├── index.php                       (Laravel Bridge Router)
-    ├── .htaccess                       (Apache URL Rewrite Engine)
+└── public_html/                             <-- PRIMARY DOMAIN ROOT (https://yourdomain.com)
+    ├── assets/                              (Compiled React 18 JS/CSS chunks)
+    ├── env-config.js                        <-- Subdomain API endpoint configuration
+    ├── index.html                           (Compiled React Single Page Application)
+    ├── .htaccess                            (SPA client-side routing & compression)
     ├── robots.txt
-    ├── check_educore.php               (Deployment verification diagnostic)
     └── [brand images & favicons]
 ```
 
@@ -48,55 +49,64 @@ In shared hosting, web traffic lands in the `public_html/` (or `www/`, `httpdocs
 
 ## 2. Pre-Packaged Deployment Archives
 
-All required files have been compiled, hardened, and placed in the directory `shared_hosting_ready/`:
+All required files are prepared in the local directory `shared_hosting_ready/`:
 
-| File / Folder | Destination on Server | Purpose |
-| :--- | :--- | :--- |
-| **`educore_backend.zip`** (or `educore_backend/`) | `/home/username/` | Private backend core (Laravel 11, dependencies, storage) |
-| **`public_html.zip`** (or `public_html/`) | `/home/username/public_html/` | Public web assets (React SPA, bridge router, .htaccess) |
-| **`educore_database.sql`** | phpMyAdmin Import | Complete database schema, roles, and initial administrator |
-
----
-
-## 3. Step-by-Step Deployment Process
-
-### Step 1: Create MySQL Database & User in cPanel
-1. Log in to your **cPanel**.
-2. Navigate to **Databases** &rarr; **MySQL® Database Wizard** (or **MySQL® Databases**).
-3. **Step 1 - Create Database:** e.g., `educoredb` (Full name will look like `username_educoredb`). Click *Next Step*.
-4. **Step 2 - Create Database User:** e.g., `educoreuser` (Full name will look like `username_educoreuser`).
-   - Generate a strong password (copy and save this password). Click *Create User*.
-5. **Step 3 - Assign Privileges:** Check the box **ALL PRIVILEGES** and click *Make Changes*.
+| Package Archive | Destination on Server | Document Root in cPanel | Purpose |
+| :--- | :--- | :--- | :--- |
+| **`educore_backend.zip`** | `/home/username/` | `educore_backend/public` | Subdomain Laravel API (`https://api.yourdomain.com`) |
+| **`public_html.zip`** | `/home/username/public_html/` | `public_html` | Domain Root React Frontend (`https://yourdomain.com`) |
+| **`educore_database.sql`** | phpMyAdmin Import | N/A | Complete MySQL schema & initial Platform Super Admin |
 
 ---
 
-### Step 2: Import the Database Schema
-1. In cPanel, click **phpMyAdmin**.
-2. In the left panel, select your newly created database (`username_educoredb`).
-3. Click the **Import** tab in the top navigation.
+## 3. Step-by-Step Deployment Walkthrough
+
+### Step 1: Create the Subdomain in cPanel
+1. In cPanel, navigate to **Domains** &rarr; **Subdomains** (or **Domains**).
+2. Enter your subdomain name:
+   - **Subdomain:** `api`
+   - **Domain:** select your primary domain (`yourdomain.com`)
+3. **CRITICAL - Document Root:**
+   - Change the default Document Root to:
+     `educore_backend/public`
+     *(Full path on disk: `/home/username/educore_backend/public`)*.
+4. Click **Create**.
+
+---
+
+### Step 2: Create MySQL Database & User in cPanel
+1. In cPanel, open **MySQL® Database Wizard**.
+2. **Step 1 - Database Name:** e.g., `educoredb` &rarr; becomes `username_educoredb`. Click *Next Step*.
+3. **Step 2 - Database User:** e.g., `educoreuser` &rarr; becomes `username_educoreuser`.
+   - Enter/generate a strong password and save it securely. Click *Create User*.
+4. **Step 3 - Privileges:** Check **ALL PRIVILEGES** and click *Make Changes*.
+
+---
+
+### Step 3: Import the Database Schema
+1. In cPanel, open **phpMyAdmin**.
+2. Select your newly created database (`username_educoredb`) in the left sidebar.
+3. Click the **Import** tab at the top.
 4. Click **Choose File** and select `educore_database.sql` (found in `shared_hosting_ready/` or `educore_backend/database/`).
-5. Ensure Character Set is `utf-8` and click **Go** (or **Import**) at the bottom.
-6. Verify that all 25 tables are created successfully (e.g., `users`, `tenants`, `credentials`, `roles`, `permissions`, etc.).
+5. Click **Go** (or **Import**).
+6. Verify that all 25 tables are created.
 
 ---
 
-### Step 3: Upload the Backend Core
+### Step 4: Upload & Configure the Backend (`educore_backend.zip`)
 1. In cPanel, open **File Manager**.
-2. Make sure you are in your home root directory (`/home/username/`, the directory that contains `public_html/`, `etc/`, `mail/`).
-3. Click **Upload** in the toolbar.
-4. Upload `educore_backend.zip`.
-5. Once uploaded, right-click `educore_backend.zip` and select **Extract**.
-   - Destination path: `/home/username/`
-   - This creates `/home/username/educore_backend/`.
-6. Enter `educore_backend/`:
-   - Locate `.env` (or copy `.env.example` to `.env`).
+2. Go to your home root directory (`/home/username/`, one level above `public_html`).
+3. Click **Upload** &rarr; Upload `educore_backend.zip`.
+4. Right-click `educore_backend.zip` &rarr; **Extract** &rarr; confirm destination `/home/username/`.
+   - This creates `/home/username/educore_backend/` with its own `public/` directory inside!
+5. Enter `educore_backend/`:
    - Right-click `.env` &rarr; **Edit**.
-   - Update the following lines with your cPanel details:
+   - Update with your live subdomain and database credentials:
      ```dotenv
      APP_NAME=EDUCORE
      APP_ENV=production
      APP_DEBUG=false
-     APP_URL=https://yourdomain.com
+     APP_URL=https://api.yourdomain.com
 
      DB_CONNECTION=mysql
      DB_HOST=127.0.0.1
@@ -109,87 +119,84 @@ All required files have been compiled, hardened, and placed in the directory `sh
 
 ---
 
-### Step 4: Upload the Public Frontend & Web Entry
+### Step 5: Upload the Frontend Dist (`public_html.zip`)
 1. In File Manager, enter your `public_html/` folder.
-   - *(Optional: If `public_html` contains default placeholder files like `default.html` or `index.html`, remove or backup them).*
-2. Click **Upload** and upload `public_html.zip`.
-3. Right-click `public_html.zip` &rarr; **Extract** directly into `/home/username/public_html/`.
-4. Ensure the `.htaccess` file is visible:
-   - In File Manager, click **Settings** (top right) &rarr; Check **Show Hidden Files (dotfiles)** &rarr; Click **Save**.
-   - Verify that `.htaccess`, `index.html`, `index.php`, and the `assets/` folder are inside `public_html/`.
+   - *(Optional: Remove any default placeholder files like `default.html` or existing `index.html`).*
+2. Click **Upload** &rarr; Upload `public_html.zip`.
+3. Right-click `public_html.zip` &rarr; **Extract** directly into `public_html/`.
+4. **Configure your API Subdomain in `env-config.js`:**
+   - Locate `env-config.js` inside `public_html/`.
+   - Right-click `env-config.js` &rarr; **Edit**.
+   - Set line 9 to your backend subdomain:
+     ```javascript
+     window.__EDUCORE_API_URL__ = "https://api.yourdomain.com/api/v1";
+     ```
+   - Click **Save Changes**.
+5. Enable hidden dotfiles:
+   - In File Manager top right, click **Settings** &rarr; Check **Show Hidden Files (dotfiles)** &rarr; Click **Save**.
+   - Confirm that `.htaccess` is present in `public_html/`.
 
 ---
 
-### Step 5: Configure Permissions
+### Step 6: Set Directory & File Permissions
 
-Shared hosting web servers (Apache/LiteSpeed with suPHP/suExec or PHP-FPM) require strict permission standards:
-
-| Path | Required Permission | Description |
+| Target Path | Permission | How to Set |
 | :--- | :---: | :--- |
-| All Directories (`public_html/`, `educore_backend/`, etc.) | **755** (`drwxr-xr-x`) | Readable and executable by web service |
-| All Files (`index.php`, `.htaccess`, `.js`, `.css`) | **644** (`-rw-r--r--`) | Readable by web service |
-| `educore_backend/storage/` (recursive) | **775** (`drwxrwxr-x`) | Application write access for logs/cache |
-| `educore_backend/bootstrap/cache/` (recursive) | **775** (`drwxrwxr-x`) | Application write access for config cache |
-| `educore_backend/.env` | **600** (`-rw-------`) | Read/write strictly by your user account |
+| All Directories (`public_html/`, `educore_backend/`) | **`755`** (`drwxr-xr-x`) | Standard cPanel directory default |
+| All Files (`.htaccess`, `.js`, `.css`, `index.php`) | **`644`** (`-rw-r--r--`) | Standard cPanel file default |
+| `educore_backend/storage/` (recursive) | **`775`** (`drwxrwxr-x`) | Right-click in File Manager &rarr; Change Permissions |
+| `educore_backend/bootstrap/cache/` | **`775`** (`drwxrwxr-x`) | Right-click in File Manager &rarr; Change Permissions |
+| `educore_backend/.env` | **`600`** (`-rw-------`) | Right-click in File Manager &rarr; Change Permissions |
 
-#### Automated Permission Hardener:
-- **If you have cPanel Terminal / SSH access:**
-  ```bash
-  cd /home/$USER/educore_backend
-  bash set_permissions.sh
-  ```
-- **If you do NOT have SSH access:**
-  In cPanel File Manager:
-  1. Right-click `educore_backend/storage` &rarr; **Change Permissions** &rarr; Set to **775**.
-  2. Right-click `educore_backend/bootstrap/cache` &rarr; **Change Permissions** &rarr; Set to **775**.
-  3. Right-click `educore_backend/.env` &rarr; **Change Permissions** &rarr; Set to **600**.
+*(If you have SSH or cPanel Terminal access, you can simply run: `cd /home/$USER/educore_backend && bash set_permissions.sh`)*.
 
 ---
 
-### Step 6: Test & Verify Live Deployment
+### Step 7: Verify Live System
 
-1. Open your browser and navigate to:
-   `https://yourdomain.com/check_educore.php`
-2. This runs an automatic diagnostic checking:
-   - PHP Version (&ge; 8.2)
-   - Backend Directory connectivity
-   - Storage write access
-   - Database connection and table verification
-3. If all checks show **OK** in green, your system is fully functional!
-4. **Security Cleanup:** Return to cPanel File Manager and delete `public_html/check_educore.php`.
+1. **Verify Backend Subdomain:**
+   Open: `https://api.yourdomain.com/check_api.php` (or `https://api.yourdomain.com/up`)
+   - It will return a JSON response confirming:
+     ```json
+     {
+         "status": "ONLINE",
+         "service": "EDUCORE Universal Ledger API",
+         "php_compatible": true,
+         "storage_writable": true,
+         "database_connected": true
+     }
+     ```
+2. **Verify Frontend Application:**
+   Open: `https://yourdomain.com/`
+   - Test navigation: verify that the home page, `/verify`, and `/admin` portals load cleanly without 404 errors.
+3. **Log in as Platform Super Admin:**
+   - Navigate to: `https://yourdomain.com/admin` (or `https://yourdomain.com/#/admin`)
+   - Enter your configured credentials:
+     - **Email:** `tredzroyale@gmail.com`
+     - **Password:** `TredzEducore2026`
+   - You will be immediately welcomed into the Platform Super Admin Governance Dashboard!
 
 ---
 
-## 4. Default Production Credentials
+## 4. Initial Platform Super Admin Credentials
 
-The initial database seed pre-provisions the Platform Regulatory Officer:
-
-| Role | Email | Default Password | Access Portal |
-| :--- | :--- | :--- | :--- |
-| **Platform Super Admin** | `root@educore.gov.ng` | `AdminPassword123!` | `https://yourdomain.com/admin` |
-
-> [!IMPORTANT]
-> Immediately log in to the Platform Governance portal at `https://yourdomain.com/admin`, navigate to Security Settings, and change the root administrator password.
+| Parameter | Value |
+| :--- | :--- |
+| **Portal URL** | `https://yourdomain.com/admin` |
+| **Email** | `tredzroyale@gmail.com` |
+| **Password** | `TredzEducore2026` |
+| **Authority Scope** | Platform Super Administrator (Governance, Accreditation, Cross-Tenant Ledger) |
 
 ---
 
 ## 5. Troubleshooting & FAQ
 
-### Issue: 500 Internal Server Error
-- **Cause 1:** Storage directory is not writable. Ensure `educore_backend/storage` has permission **775**.
-- **Cause 2:** Missing PHP extensions. Ensure your cPanel **Select PHP Version** has the following extensions enabled:
-  `pdo_mysql`, `openssl`, `mbstring`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `curl`, `fileinfo`.
-- **Cause 3:** Error in `.env` database password (special characters like `#` should be enclosed in quotes: `DB_PASSWORD="p#ssword"`).
+### CORS Error in Browser Console (`Access to fetch at ... has been blocked by CORS policy`)
+- **Fix:** Both `backend/config/cors.php` and `educore_backend/public/.htaccess` include wildcards (`*`) for cross-subdomain access. Ensure your subdomain `.htaccess` is uploaded inside `educore_backend/public/`.
 
-### Issue: 401 Unauthorized on API requests
-- **Cause:** Apache stripped the `Authorization` header.
-- **Solution:** Verify that your `public_html/.htaccess` contains:
-  ```apache
-  RewriteCond %{HTTP:Authorization} .
-  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-  ```
-  *(This is already included by default in our pre-packaged `.htaccess`).*
+### 500 Internal Server Error on Subdomain
+- **Check 1:** Check that `educore_backend/storage/` has permission `775`.
+- **Check 2:** In cPanel **Select PHP Version**, ensure PHP is &ge; 8.2 and the following extensions are checked: `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `bcmath`, `fileinfo`.
 
-### Issue: Page Reloads give 404 (e.g. `/verify` or `/admin`)
-- **Cause:** `.htaccess` is missing or `mod_rewrite` is not active.
-- **Solution:** Make sure `.htaccess` is in `public_html/`. In cPanel File Manager, turn on "Show Hidden Files" to confirm `.htaccess` exists.
+### Page Refresh on Frontend gives 404
+- **Fix:** Ensure `.htaccess` exists in `public_html/`. In cPanel File Manager, check "Show Hidden Files" to confirm.
