@@ -36,7 +36,7 @@ return new class extends Migration
             $table->timestamp('enrolled_at')->useCurrent();
             $table->timestamps();
 
-            $table->unique(['tenant_id', 'device_person_reference']);
+            $table->unique(['tenant_id', 'device_person_reference'], 'bio_mappings_tenant_device_unique');
         });
 
         Schema::create('attendance_corrections', function (Blueprint $table) {
