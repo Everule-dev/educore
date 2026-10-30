@@ -28,6 +28,7 @@ vendor/
 dist/
 /frontend/dist/
 *.tsbuildinfo
+shared_hosting_ready/
 
 # Laravel Storage, Cache, and Framework Files
 /backend/storage/*.key
